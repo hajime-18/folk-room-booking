@@ -10,10 +10,11 @@
 // 行われます。詳しくはREADME.mdを参照してください。
 
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyDnAi7AEUk2GoP_vJSvvshHaGYmQiW_32o",
+  authDomain: "folk-bandroom-booking.firebaseapp.com",
+  projectId: "folk-bandroom-booking",
+  storageBucket: "folk-bandroom-booking.firebasestorage.app",
+  messagingSenderId: "645917817167",
+  appId: "1:645917817167:web:54551c61839b5e735e6d3a",
+  //measurementId: "G-DT9X23FX8F"
 };
