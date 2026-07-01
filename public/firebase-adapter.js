@@ -6,7 +6,7 @@
 // app.js の startApp() に渡すことで、実際のFirebaseに接続せずに
 // アプリのロジックだけを検証できるようにしている。
 
-import { firebaseConfig } from './firebase-config.js';
+import { firebaseConfig, requiredEmailDomain } from './firebase-config.js';
 
 const SDK_VERSION = '10.13.2';
 const BASE = 'https://www.gstatic.com/firebasejs/' + SDK_VERSION + '/';
@@ -27,14 +27,20 @@ export async function createFirebaseAdapter(){
   const auth = authMod.getAuth(app);
   const db = storeMod.getFirestore(app);
 
+  const googleProvider = new authMod.GoogleAuthProvider();
+  if (requiredEmailDomain && requiredEmailDomain !== 'YOUR_SCHOOL_DOMAIN'){
+    // アカウント選択画面で自校のGoogle Workspaceアカウントを選びやすくするヒント。
+    // あくまでUX上のヒントであり、実際のアクセス制御はfirestore.rules側で行う。
+    googleProvider.setCustomParameters({ hd: requiredEmailDomain });
+  }
+
   return {
     auth: auth,
     db: db,
-    createUserWithEmailAndPassword: authMod.createUserWithEmailAndPassword,
-    signInWithEmailAndPassword: authMod.signInWithEmailAndPassword,
+    requiredEmailDomain: requiredEmailDomain,
+    signInWithPopup: (a) => authMod.signInWithPopup(a, googleProvider),
     signOut: authMod.signOut,
     onAuthStateChanged: authMod.onAuthStateChanged,
-    deleteUser: authMod.deleteUser,
     collection: storeMod.collection,
     doc: storeMod.doc,
     setDoc: storeMod.setDoc,

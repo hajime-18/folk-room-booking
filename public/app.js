@@ -185,8 +185,6 @@ const SLOT_MIN = 30;
 const GRID_START_MIN = 8 * 60;
 const GRID_END_MIN = 20 * 60;
 const WEEKDAY_LABEL = ['日', '月', '火', '水', '木', '金', '土'];
-const MIN_PASSWORD_LEN = 6; // Firebase Authenticationの既定要件(6文字以上)に合わせる
-const AUTH_EMAIL_DOMAIN = 'clubroom.invalid'; // バンド/個人用の内部識別子として使う架空のメールドメイン
 
 const NOTICE_SECTIONS = [
   { key: 'caution', label: '注意事項' },
@@ -212,20 +210,13 @@ let selectedReservationId = null;
 let draftStart = null;
 let draftDuration = null;
 
-let unlockedBandId = null;
-let authBandSelectId = '';
-let authPasswordDraft = '';
-let authError = '';
+let actingBandId = ''; // 「今どの人として予約するか」の選択(認証ではなく単なる選択)
 
 let regTypeDraft = 'band'; // 'band' | 'individual'
 let regNameDraft = '';
-let regPasswordDraft = '';
-let regPasswordConfirmDraft = '';
 let regNoteDraft = '';
 
 let deletingBandId = null;
-let deletePasswordDraft = '';
-let deleteError = '';
 
 let noticeTab = NOTICE_SECTIONS[0].key; // '連絡事項'内のどのサブタブを見ているか('liveEvents'も入る)
 let noticeDraftText = '';
@@ -247,12 +238,10 @@ let linkUrlDraft = '';
 
 let toast = null;
 let connected = false;
+let currentUser = null;
+let authReady = false;
+let dataSubscribed = false;
 
-function randomLocalPart(){
-  const arr = new Uint8Array(12);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-}
 function todayIsoDate(){
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -377,6 +366,19 @@ function render(){
       '</div>';
     return;
   }
+  if (!authReady){
+    rootEl.innerHTML = '<div style="max-width:640px;margin:60px auto;padding:24px;font-family:sans-serif;color:#5F6368;">読み込み中...</div>';
+    return;
+  }
+  if (!currentUser){
+    rootEl.innerHTML = renderSignInScreen();
+    return;
+  }
+  if (isDomainRestricted() && !emailMatchesDomain(currentUser.email)){
+    rootEl.innerHTML = renderDomainMismatchScreen();
+    return;
+  }
+
   const screens = {
     register: renderRegisterScreen,
     book: renderBookScreen,
@@ -395,6 +397,34 @@ function render(){
   attachFieldEvents();
 }
 
+function isDomainRestricted(){
+  return !!(fbSdk.requiredEmailDomain && fbSdk.requiredEmailDomain !== 'YOUR_SCHOOL_DOMAIN');
+}
+function emailMatchesDomain(email){
+  return !!email && email.toLowerCase().endsWith('@' + fbSdk.requiredEmailDomain.toLowerCase());
+}
+
+function renderSignInScreen(){
+  return (
+    '<div style="max-width:420px;margin:80px auto;padding:32px;text-align:center;font-family:inherit;">' +
+      '<h1 style="font-size:20px;margin:0 0 8px;">部室予約システム</h1>' +
+      '<p style="color:#5F6368;font-size:13px;margin:0 0 24px;">利用にはGoogleアカウントでのログインが必要です。</p>' +
+      '<button class="btn" type="button" data-action="google-sign-in" style="width:100%;">Googleでログイン</button>' +
+    '</div>'
+  );
+}
+
+function renderDomainMismatchScreen(){
+  return (
+    '<div style="max-width:420px;margin:80px auto;padding:32px;text-align:center;font-family:inherit;">' +
+      '<h1 style="font-size:20px;margin:0 0 8px;">利用できません</h1>' +
+      '<p style="color:#5F6368;font-size:13px;margin:0 0 8px;">このアプリは <strong>@' + escapeHtml(fbSdk.requiredEmailDomain) + '</strong> のアカウントでのみ利用できます。</p>' +
+      '<p style="color:#5F6368;font-size:13px;margin:0 0 24px;">現在ログイン中: ' + escapeHtml(currentUser.email || '') + '</p>' +
+      '<button class="btn secondary" type="button" data-action="sign-out" style="width:100%;">別のアカウントでログインし直す</button>' +
+    '</div>'
+  );
+}
+
 function renderHeader(){
   return (
     '<div class="app-header"><div class="app-header-inner">' +
@@ -402,8 +432,13 @@ function renderHeader(){
         '<h1 class="app-title">部室予約システム</h1>' +
         '<p class="app-sub">軽音楽部 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
       '</div>' +
-      '<div class="conn-status"><span class="conn-dot' + (connected ? '' : ' offline') + '"></span>' +
-        (connected ? 'リアルタイム同期中' : '接続中...') +
+      '<div style="display:flex;align-items:center;gap:14px;">' +
+        '<div class="conn-status"><span class="conn-dot' + (connected ? '' : ' offline') + '"></span>' +
+          (connected ? 'リアルタイム同期中' : '接続中...') +
+        '</div>' +
+        '<div class="conn-status">' + escapeHtml(currentUser.email || '') +
+          ' <button class="link-btn" type="button" data-action="sign-out">ログアウト</button>' +
+        '</div>' +
       '</div>' +
     '</div></div>'
   );
@@ -448,14 +483,10 @@ function renderRegisterScreen(){
         '</div>' +
         '<label for="reg-name">' + nameLabel + '</label>' +
         '<input id="reg-name" type="text" maxlength="30" placeholder="' + namePlaceholder + '" value="' + escapeHtml(regNameDraft) + '">' +
-        '<label for="reg-password">パスワード(' + MIN_PASSWORD_LEN + '文字以上)</label>' +
-        '<input id="reg-password" type="password" maxlength="40" value="' + escapeHtml(regPasswordDraft) + '">' +
-        '<label for="reg-password-confirm">パスワード(確認)</label>' +
-        '<input id="reg-password-confirm" type="password" maxlength="40" value="' + escapeHtml(regPasswordConfirmDraft) + '">' +
         '<label for="reg-note">' + (isIndividual ? '楽器・メモ(任意)' : 'メンバー・メモ(任意)') + '</label>' +
         '<input id="reg-note" type="text" maxlength="60" placeholder="' + (isIndividual ? '例: Gt' : '例: Vo/Gt 山田, Ba 佐藤') + '" value="' + escapeHtml(regNoteDraft) + '">' +
         '<button class="btn block" type="button" data-action="register-band">登録する</button>' +
-        '<p class="hint">パスワードはFirebase Authenticationによって安全に管理され、他の人が読み取ることはできません。予約画面で選んで操作するときに必要です。個人練習の予約も、バンドと同じ利用ルール(1日2時間まで・2週間で2件まで)が適用されます。</p>' +
+        '<p class="hint">認証は行いません。部員内の信頼にもとづいて運用してください。個人練習の予約も、バンドと同じ利用ルール(1日2時間まで・2週間で2件まで)が適用されます。</p>' +
       '</div>' +
     '</div>'
   );
@@ -469,13 +500,8 @@ function renderBandRow(b){
   if (hasFuture){
     deleteControl = '<button class="link-btn" type="button" disabled title="今後の予約があるため削除できません">削除</button>';
   } else if (isDeleting){
-    deleteControl =
-      '<div class="inline-delete">' +
-        '<input type="password" id="delete-password-input" placeholder="パスワード" value="' + escapeHtml(deletePasswordDraft) + '">' +
-        '<button class="btn small danger" type="button" data-action="confirm-delete-band" data-band-id="' + b.id + '">削除する</button>' +
-        '<button class="link-btn" type="button" data-action="cancel-delete-band">やめる</button>' +
-      '</div>' +
-      (deleteError ? '<div class="msg warn">' + escapeHtml(deleteError) + '</div>' : '');
+    deleteControl = '<button class="link-btn" type="button" data-action="confirm-delete-band" data-band-id="' + b.id + '">本当に削除する</button>' +
+      '<button class="link-btn" type="button" data-action="cancel-delete-band">やめる</button>';
   } else {
     deleteControl = '<button class="link-btn" type="button" data-action="start-delete-band" data-band-id="' + b.id + '">削除</button>';
   }
@@ -483,9 +509,8 @@ function renderBandRow(b){
     '<div class="band-row">' +
       '<div><div class="name">' + typeTag + ' ' + escapeHtml(b.name) + '</div>' +
       (b.note ? '<div class="note">' + escapeHtml(b.note) + '</div>' : '') + '</div>' +
-      '<div>' + (isDeleting ? '' : deleteControl) + '</div>' +
-    '</div>' +
-    (isDeleting ? deleteControl : '')
+      '<div>' + deleteControl + '</div>' +
+    '</div>'
   );
 }
 
@@ -498,10 +523,7 @@ function renderBookScreen(){
       renderCalendarGrid() +
       renderLegend() +
     '</div>' +
-    '<div class="grid-2col">' +
-      renderAuthPanel() +
-      renderBookingPanel() +
-    '</div>'
+    renderBookingPanel()
   );
 }
 
@@ -512,7 +534,6 @@ function renderReservationDetail(){
   const parts = r.date.split('-').map(Number);
   const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
   const dateLabel = parts[0] + '年' + parts[1] + '月' + parts[2] + '日(' + WEEKDAY_LABEL[dateObj.getDay()] + ')';
-  const canCancel = unlockedBandId === r.bandId;
 
   return (
     '<div class="reso-detail show">' +
@@ -521,7 +542,7 @@ function renderReservationDetail(){
         '<div class="rd-when">' + dateLabel + '　' + minutesToHHMM(r.start) + ' 〜 ' + minutesToHHMM(r.end) + '</div>' +
       '</div>' +
       '<div class="rd-actions">' +
-        (canCancel ? '<button class="link-btn" type="button" data-action="cancel-reservation" data-res-id="' + r.id + '">この予約を取消</button>' : '') +
+        '<button class="link-btn" type="button" data-action="cancel-reservation" data-res-id="' + r.id + '">この予約を取消</button>' +
         '<button class="link-btn" type="button" data-action="close-reservation-detail" aria-label="閉じる">閉じる</button>' +
       '</div>' +
     '</div>'
@@ -616,53 +637,21 @@ function renderLegend(){
   );
 }
 
-function renderAuthPanel(){
-  if (unlockedBandId){
-    const band = bands.find(b => b.id === unlockedBandId);
-    return (
-      '<div class="panel">' +
-        '<h2>' + icon('lock') + ' 予約する人を選んで認証</h2>' +
-        '<div class="auth-status">認証中: <strong>' + escapeHtml(band ? band.name : '') + '</strong>' +
-          '<button class="link-btn" type="button" data-action="logout">切り替える</button>' +
-        '</div>' +
-        '<p class="hint">この状態で下のフォームから予約や、自分の予約の取消ができます。</p>' +
-      '</div>'
-    );
-  }
-
+function renderBookingPanel(){
   if (bands.length === 0){
-    return '<div class="panel"><h2>' + icon('lock') + ' 予約する人を選んで認証</h2><p class="empty-note">まだ何も登録されていません。「登録(バンド・個人)」タブから登録してください。</p></div>';
+    return '<div class="panel"><h2>予約する</h2><p class="empty-note">まだ何も登録されていません。「登録(バンド・個人)」タブから登録してください。</p></div>';
   }
+  if (!actingBandId || !bands.some(b => b.id === actingBandId)) actingBandId = bands[0].id;
+  const band = bands.find(b => b.id === actingBandId);
 
-  if (!authBandSelectId || !bands.some(b => b.id === authBandSelectId)) authBandSelectId = bands[0].id;
-  const options = bands.map(b =>
-    '<option value="' + b.id + '"' + (b.id === authBandSelectId ? ' selected' : '') + '>' +
+  const bandOptions = bands.map(b =>
+    '<option value="' + b.id + '"' + (b.id === actingBandId ? ' selected' : '') + '>' +
       escapeHtml(b.name) + (b.type === 'individual' ? '(個人)' : '(バンド)') +
     '</option>'
   ).join('');
-
-  return (
-    '<div class="panel">' +
-      '<h2>' + icon('lock') + ' 予約する人を選んで認証</h2>' +
-      '<label for="auth-band-select">バンド・個人を選択</label>' +
-      '<select id="auth-band-select">' + options + '</select>' +
-      '<label for="auth-password-input">パスワード</label>' +
-      '<input id="auth-password-input" type="password" value="' + escapeHtml(authPasswordDraft) + '">' +
-      '<button class="btn block" type="button" data-action="unlock-band">認証する</button>' +
-      (authError ? '<div class="msg warn">' + escapeHtml(authError) + '</div>' : '') +
-      '<p class="hint">予約カレンダーは誰でも見られますが、予約や取消にはそれぞれのパスワードが必要です。</p>' +
-    '</div>'
-  );
-}
-
-function renderBookingPanel(){
-  if (!unlockedBandId){
-    return '<div class="panel"><h2>予約する</h2><p class="empty-note">左のパネルでバンドを選び、パスワードを入力すると予約できます。</p></div>';
-  }
-  const band = bands.find(b => b.id === unlockedBandId);
-  if (!band){
-    return '<div class="panel"><h2>予約する</h2><p class="empty-note">選択中のバンドが見つかりません。再読み込みしてください。</p></div>';
-  }
+  const bandSelectHtml =
+    '<label for="acting-band-select">予約するバンド・個人を選択</label>' +
+    '<select id="acting-band-select">' + bandOptions + '</select>';
 
   const dates = getBookableDates();
   if (!selectedDate || !dates.some(d => toDateStr(d) === selectedDate)) selectedDate = toDateStr(dates[0]);
@@ -733,6 +722,7 @@ function renderBookingPanel(){
   return (
     '<div class="panel">' +
       '<h2>予約する</h2>' +
+      bandSelectHtml +
       '<label for="date-select">日付</label>' +
       '<select id="date-select">' + dateOptions + '</select>' +
       formBody +
@@ -879,8 +869,7 @@ function renderFooterNote(){
       '<strong>利用ルール:</strong> 平日・土曜は8:00-20:00、日曜・祝日は10:00-18:00に利用できます。' +
       '予約は30分単位、1バンド(・個人)1日最大2時間まで。予約可能な期間は当日から2週間先までで、毎日20:00に翌日分が新たに解放されます。' +
       '各バンド・各個人はこの2週間の範囲内で最大2件まで予約できます。祝日は法律に基づく算出ロジックで自動判定しています(振替休日・国民の休日を含む)。' +
-      'パスワードはFirebase Authenticationで安全に管理されます。データはFirestoreのセキュリティルールにより、各バンド・各個人が自分自身の予約のみ作成・削除できるように保護されています。' +
-      '連絡事項・備品持ち出し記録・各種リンクはパスワード不要で誰でも編集できます。' +
+      'このアプリの利用にはGoogleアカウントでのログインが必要です。ログインさえしていれば、登録・予約・取消・連絡事項や備品記録の編集は誰でも行えます(部員内の信頼にもとづく運用)。' +
       '複数人が同時に操作すると、ごく稀に表示のずれが生じる場合があります。おかしいと感じたら再読み込みしてください。' +
     '</div>'
   );
@@ -901,11 +890,7 @@ function escapeHtml(s){
    ============================================================ */
 function attachFieldEvents(){
   bindInput('reg-name', v => { regNameDraft = v; });
-  bindInput('reg-password', v => { regPasswordDraft = v; });
-  bindInput('reg-password-confirm', v => { regPasswordConfirmDraft = v; });
   bindInput('reg-note', v => { regNoteDraft = v; });
-  bindInput('delete-password-input', v => { deletePasswordDraft = v; });
-  bindInput('auth-password-input', v => { authPasswordDraft = v; });
   bindInput('notice-textarea', v => { noticeDraftText = v; });
   bindInput('live-event-name', v => { liveEventNameDraft = v; });
   bindInput('live-event-date', v => { liveEventDateDraft = v; });
@@ -919,8 +904,10 @@ function attachFieldEvents(){
   bindInput('link-label', v => { linkLabelDraft = v; });
   bindInput('link-url', v => { linkUrlDraft = v; });
 
-  const authBandSelect = rootEl.querySelector('#auth-band-select');
-  if (authBandSelect) authBandSelect.addEventListener('change', e => { authBandSelectId = e.target.value; });
+  const actingBandSelect = rootEl.querySelector('#acting-band-select');
+  if (actingBandSelect) actingBandSelect.addEventListener('change', e => {
+    actingBandId = e.target.value; draftStart = null; draftDuration = null; render();
+  });
 
   const dateSelect = rootEl.querySelector('#date-select');
   if (dateSelect) dateSelect.addEventListener('change', e => {
@@ -956,27 +943,25 @@ function attachDelegatedClickOnce(){
 
     if (action === 'nav'){
       view = el.dataset.view;
-      authError = ''; deleteError = ''; deletingBandId = null;
+      deletingBandId = null;
       render();
+    } else if (action === 'google-sign-in'){
+      await handleGoogleSignIn();
+    } else if (action === 'sign-out'){
+      await fbSdk.signOut(fbSdk.auth);
     } else if (action === 'set-reg-type'){
       regTypeDraft = el.dataset.type; render();
     } else if (action === 'register-band'){
       await handleRegisterBand();
     } else if (action === 'start-delete-band'){
-      deletingBandId = el.dataset.bandId; deletePasswordDraft = ''; deleteError = ''; render();
+      deletingBandId = el.dataset.bandId; render();
     } else if (action === 'cancel-delete-band'){
-      deletingBandId = null; deletePasswordDraft = ''; deleteError = ''; render();
+      deletingBandId = null; render();
     } else if (action === 'confirm-delete-band'){
       await handleDeleteBand(el.dataset.bandId);
-    } else if (action === 'unlock-band'){
-      await handleUnlockBand();
-    } else if (action === 'logout'){
-      await fbSdk.signOut(fbSdk.auth);
-      unlockedBandId = null; draftStart = null; draftDuration = null; render();
     } else if (action === 'grid-pick'){
       selectedDate = el.dataset.date; draftStart = Number(el.dataset.start); draftDuration = null;
       render();
-      if (!unlockedBandId) showToast('予約するには、下のパネルでバンドを選んでパスワードを入力してください。');
     } else if (action === 'show-reservation-detail'){
       selectedReservationId = el.dataset.resId;
       render();
@@ -1020,31 +1005,22 @@ function attachDelegatedClickOnce(){
    ============================================================ */
 async function handleRegisterBand(){
   const name = regNameDraft.trim();
-  const pw = regPasswordDraft;
-  const pwConfirm = regPasswordConfirmDraft;
-
-  if (!name){ showToast('バンド名を入力してください。', true); return; }
-  if (pw.length < MIN_PASSWORD_LEN){ showToast('パスワードは' + MIN_PASSWORD_LEN + '文字以上で設定してください。', true); return; }
-  if (pw !== pwConfirm){ showToast('パスワード(確認)が一致しません。', true); return; }
+  if (!name){ showToast('名前を入力してください。', true); return; }
 
   const dup = bands.some(b => b.name.toLowerCase() === name.toLowerCase());
-  if (dup){ showToast('この名前のバンドは既に登録されています。', true); return; }
-
-  const authEmail = randomLocalPart() + '@' + AUTH_EMAIL_DOMAIN;
+  if (dup){ showToast('この名前は既に登録されています。', true); return; }
 
   try {
-    const cred = await fbSdk.createUserWithEmailAndPassword(fbSdk.auth, authEmail, pw);
-    const uid = cred.user.uid;
-    await fbSdk.setDoc(fbSdk.doc(fbSdk.db, 'bands', uid), {
+    await fbSdk.addDoc(fbSdk.collection(fbSdk.db, 'bands'), {
       name: name, nameLower: name.toLowerCase(), note: regNoteDraft.trim(),
       type: regTypeDraft === 'individual' ? 'individual' : 'band',
-      authEmail: authEmail, createdAt: fbSdk.serverTimestamp(),
+      createdByEmail: (fbSdk.auth.currentUser && fbSdk.auth.currentUser.email) || '',
+      createdAt: fbSdk.serverTimestamp(),
     });
-    await fbSdk.signOut(fbSdk.auth); // 登録直後は自動ログインさせず、明示的な認証操作に統一する
-    regNameDraft = ''; regPasswordDraft = ''; regPasswordConfirmDraft = ''; regNoteDraft = '';
+    regNameDraft = ''; regNoteDraft = '';
     showToast(name + ' を登録しました。');
   } catch (e) {
-    showToast('登録に失敗しました: ' + describeAuthError(e), true);
+    showToast('登録に失敗しました: ' + e.message, true);
   }
 }
 
@@ -1052,35 +1028,16 @@ async function handleDeleteBand(id){
   const band = bands.find(b => b.id === id);
   if (!band){ deletingBandId = null; render(); return; }
   if (bandHasFutureReservations(id)){
-    deleteError = 'このバンドには今後の予約があるため削除できません。';
-    render(); return;
+    showToast('このバンドには今後の予約があるため削除できません。', true);
+    deletingBandId = null; render(); return;
   }
   try {
-    // パスワードの正しさは「そのパスワードでサインインできるか」で検証する
-    // (パスワードそのものはこちらで保持・比較しない。Firebaseにすべて委ねる)
-    const cred = await fbSdk.signInWithEmailAndPassword(fbSdk.auth, band.authEmail, deletePasswordDraft);
     await fbSdk.deleteDoc(fbSdk.doc(fbSdk.db, 'bands', id));
-    await fbSdk.deleteUser(cred.user);
-    if (unlockedBandId === id) unlockedBandId = null;
-    deletingBandId = null; deletePasswordDraft = ''; deleteError = '';
+    if (actingBandId === id) actingBandId = '';
+    deletingBandId = null;
     showToast(band.name + ' を削除しました。');
   } catch (e) {
-    deleteError = 'パスワードが正しくありません。';
-    render();
-  }
-}
-
-async function handleUnlockBand(){
-  const band = bands.find(b => b.id === authBandSelectId);
-  if (!band){ authError = 'バンドが見つかりません。再読み込みしてください。'; render(); return; }
-  try {
-    await fbSdk.signInWithEmailAndPassword(fbSdk.auth, band.authEmail, authPasswordDraft);
-    unlockedBandId = band.id;
-    authPasswordDraft = ''; authError = '';
-    draftStart = null; draftDuration = null;
-    render();
-  } catch (e) {
-    authError = 'パスワードが正しくありません。';
+    showToast('削除に失敗しました: ' + e.message, true);
     render();
   }
 }
@@ -1092,9 +1049,9 @@ async function handleSubmitBooking(){
   bookingInFlight = true;
   try {
     const dateStr = selectedDate;
-    const band = bands.find(b => b.id === unlockedBandId);
-    if (!band || !fbSdk.auth.currentUser){
-      showToast('認証状態が失われました。再度パスワードを入力してください。', true); unlockedBandId = null; render(); return;
+    const band = bands.find(b => b.id === actingBandId);
+    if (!band){
+      showToast('予約するバンド・個人を選択してください。', true); render(); return;
     }
 
     const parts = dateStr.split('-').map(Number);
@@ -1147,9 +1104,6 @@ async function handleCancelReservation(id){
   try {
     const res = reservations.find(r => r.id === id);
     if (!res){ render(); return; }
-    if (res.bandId !== unlockedBandId){
-      showToast('このバンドで認証していないため取消できません。', true); render(); return;
-    }
     await fbSdk.deleteDoc(fbSdk.doc(fbSdk.db, 'reservations', id));
     showToast(res.bandName + 'の予約(' + res.date + ' ' + minutesToHHMM(res.start) + '-' + minutesToHHMM(res.end) + ')を取り消しました。');
   } catch (e) {
@@ -1157,13 +1111,6 @@ async function handleCancelReservation(id){
   } finally {
     cancelInFlight = false;
   }
-}
-
-function describeAuthError(e){
-  const code = (e && e.code) || '';
-  if (code.indexOf('weak-password') !== -1) return 'パスワードが短すぎます。';
-  if (code.indexOf('email-already-in-use') !== -1) return '内部エラー(識別子の重複)。もう一度お試しください。';
-  return (e && e.message) ? e.message : '不明なエラー';
 }
 
 /* ============================================================
@@ -1284,16 +1231,33 @@ async function handleDeleteLink(id){
 }
 
 /* ============================================================
+   ハンドラ(Googleログイン)
+   ============================================================ */
+async function handleGoogleSignIn(){
+  try {
+    await fbSdk.signInWithPopup(fbSdk.auth);
+  } catch (e) {
+    showToast('ログインに失敗しました: ' + e.message, true);
+  }
+}
+
+/* ============================================================
    初期化
    ============================================================ */
 attachDelegatedClickOnce();
 if (isConfigured){
   fbSdk.onAuthStateChanged(fbSdk.auth, function(user){
-    unlockedBandId = user ? user.uid : null;
+    currentUser = user;
+    authReady = true;
+    const allowed = user && (!isDomainRestricted() || emailMatchesDomain(user.email));
+    if (allowed && !dataSubscribed){
+      dataSubscribed = true;
+      subscribeToData();
+    }
     render();
   });
-  subscribeToData();
+} else {
+  render();
 }
-render();
 
 } // startApp

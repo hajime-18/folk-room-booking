@@ -3,47 +3,45 @@ rules_version = '2';
 // このルールをFirebaseコンソール > Firestore Database > ルール タブに
 // 貼り付けて「公開」してください。README.md の手順も参照。
 //
+// ⚠️ 下の YOUR_SCHOOL_DOMAIN を、実際の学校のGoogle Workspaceドメインに
+//    書き換えてください(例: "xxx.ac.jp")。書き換えないと誰もアクセスできません
+//    (安全側に倒れる=全員拒否になるので、動かない場合はまずここを疑ってください)。
+//    firebase-config.js の requiredEmailDomain とも同じ値にしてください。
+//
 // 方針:
-//   - bands(バンド・個人共通) / reservations は、これまで通りFirebase Authenticationで
-//     認証済みの本人(uid一致)のみが作成・削除できる。
-//   - notices / liveEvents / equipment / links(連絡事項・ライブ予定・備品持ち出し記録・
-//     各種リンク)は、部員内の信頼で運用する方針のため、認証なしで誰でも読み書きできる。
-//     裏を返すと、このサイトのURLを知っていれば誰でもこれらの内容を書き換え・削除できる
-//     ということでもある。荒らされたくない情報はここに載せないこと。
-//   - 「2週間で最大2件」「時間帯の重複」「営業時間(祝日判定含む)」といった
+//   - このアプリは「学校ドメインのGoogleアカウントでログインしていること」を
+//     すべての読み書きの条件にしています(サイト全体がログイン必須)。
+//   - ログインさえしていれば、登録・予約・削除・連絡事項の編集など、
+//     すべての操作を誰でも行えます(バンドごとの所有権チェックはしていません)。
+//     これは部員内の信頼にもとづく運用を前提にした設計です。
+//   - 「2週間で最大2件」「時間帯の重複禁止」「営業時間(祝日判定含む)」といった
 //     複数ドキュメントをまたぐ複雑な業務ルールは、Firestoreルールの範囲では
-//     効率的に検証できないため、引き続きクライアント側(app.js)でチェックしている。
+//     効率的に検証できないため、引き続きクライアント側(app.js)でチェックしています。
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() {
-      return request.auth != null;
+    function isMember() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower().matches('.*@okayama-u.ac.jp$');
     }
 
     match /bands/{bandId} {
-      allow read: if true;
-
-      allow create: if isSignedIn()
-        && request.auth.uid == bandId
-        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'note', 'type', 'authEmail', 'createdAt'])
+      allow read: if isMember();
+      allow create: if isMember()
+        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'note', 'type', 'createdByEmail', 'createdAt'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 30
-        && request.resource.data.nameLower is string
-        && request.resource.data.authEmail is string
         && request.resource.data.type in ['band', 'individual'];
-
       allow update: if false;
-
-      allow delete: if isSignedIn() && request.auth.uid == bandId;
+      allow delete: if isMember();
     }
 
     match /reservations/{resId} {
-      allow read: if true;
-
-      allow create: if isSignedIn()
-        && request.resource.data.bandId == request.auth.uid
+      allow read: if isMember();
+      allow create: if isMember()
         && request.resource.data.keys().hasOnly(['bandId', 'bandName', 'date', 'start', 'end', 'createdAt'])
         && request.resource.data.bandName is string
         && request.resource.data.date is string
@@ -55,45 +53,45 @@ service cloud.firestore {
         && request.resource.data.end > request.resource.data.start
         && (request.resource.data.end - request.resource.data.start) <= 120
         && (request.resource.data.end - request.resource.data.start) % 30 == 0;
-
       allow update: if false;
-
-      allow delete: if isSignedIn() && resource.data.bandId == request.auth.uid;
+      allow delete: if isMember();
     }
 
-    // ---- ここから下は認証不要(部員内の信頼で運用) ----
-
     match /notices/{noticeId} {
-      allow read: if true;
-      allow write: if request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedAtLabel'])
+      allow read: if isMember();
+      allow write: if isMember()
+        && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedAtLabel'])
         && request.resource.data.text is string
         && request.resource.data.text.size() <= 5000;
     }
 
     match /liveEvents/{id} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['eventName', 'date', 'timeNote', 'venue', 'createdAt'])
+      allow read: if isMember();
+      allow create, update: if isMember()
+        && request.resource.data.keys().hasOnly(['eventName', 'date', 'timeNote', 'venue', 'createdAt'])
         && request.resource.data.eventName is string && request.resource.data.eventName.size() <= 60
         && request.resource.data.venue is string && request.resource.data.venue.size() <= 60;
-      allow delete: if true;
+      allow delete: if isMember();
     }
 
     match /equipment/{id} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['itemName', 'borrower', 'checkoutDate', 'returnDate', 'note', 'returned', 'createdAt'])
+      allow read: if isMember();
+      allow create, update: if isMember()
+        && request.resource.data.keys().hasOnly(['itemName', 'borrower', 'checkoutDate', 'returnDate', 'note', 'returned', 'createdAt'])
         && request.resource.data.itemName is string && request.resource.data.itemName.size() <= 40
         && request.resource.data.borrower is string && request.resource.data.borrower.size() <= 40
         && request.resource.data.returned is bool;
-      allow delete: if true;
+      allow delete: if isMember();
     }
 
     match /links/{id} {
-      allow read: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['label', 'url', 'createdAt'])
+      allow read: if isMember();
+      allow create, update: if isMember()
+        && request.resource.data.keys().hasOnly(['label', 'url', 'createdAt'])
         && request.resource.data.label is string && request.resource.data.label.size() <= 40
         && request.resource.data.url is string && request.resource.data.url.size() <= 300
         && request.resource.data.url.matches('^https?://.*');
-      allow delete: if true;
+      allow delete: if isMember();
     }
   }
 }

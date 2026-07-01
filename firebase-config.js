@@ -18,3 +18,9 @@ export const firebaseConfig = {
   appId: "1:645917817167:web:54551c61839b5e735e6d3a",
   //measurementId: "G-DT9X23FX8F"
 };
+
+// 学校共通のGoogle Workspaceドメイン(例: "xxx.ac.jp")。
+// この値は「アカウント選択画面でのヒント」としてのみ使われ、
+// 実際のアクセス制御(このドメイン以外を弾く)は firestore.rules 側で行っています。
+// firestore.rules 内の同じ文字列も、必ずこれと同じ値に書き換えてください。
+export const requiredEmailDomain = "YOUR_SCHOOL_DOMAIN";
