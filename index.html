@@ -167,6 +167,36 @@
   .footer-note{ max-width:1180px; margin:0 auto; padding:0 24px 32px; font-size:11px; color:var(--ink-dim); line-height:1.8; }
   .footer-note strong{ color:var(--ink); }
 
+  .seg-control{ display:flex; gap:6px; margin-top:6px; }
+  .seg-btn{
+    flex:1; background:var(--surface-2); border:1px solid var(--line-strong); color:var(--ink-dim);
+    padding:8px 10px; border-radius:8px; font-size:13px; cursor:pointer; font-weight:500;
+  }
+  .seg-btn.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-hover); }
+
+  .type-tag{
+    display:inline-block; font-size:10px; font-weight:600; padding:1px 7px; border-radius:10px;
+    background:var(--accent-soft); color:var(--accent-hover); vertical-align:middle; margin-right:2px;
+  }
+  .type-tag.individual{ background:#FEF7E0; color:#8A6D00; }
+
+  .subtabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .subtab{
+    background:var(--surface-2); border:1px solid var(--line); color:var(--ink-dim);
+    padding:7px 12px; border-radius:16px; font-size:12.5px; cursor:pointer; font-weight:500;
+  }
+  .subtab.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .subtab:hover:not(.active){ border-color:var(--accent-soft-strong); color:var(--ink); }
+
+  .form-card-inline{ margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+
+  textarea{
+    font-family:inherit; font-size:14px; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line-strong); border-radius:8px; padding:10px 12px;
+    box-sizing:border-box; resize:vertical;
+  }
+  textarea:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+
   .icon{ width:14px; height:14px; vertical-align:-2px; }
 
   @media (prefers-reduced-motion:reduce){ *{ transition:none !important; animation:none !important; } }

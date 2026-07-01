@@ -186,13 +186,25 @@ const GRID_START_MIN = 8 * 60;
 const GRID_END_MIN = 20 * 60;
 const WEEKDAY_LABEL = ['日', '月', '火', '水', '木', '金', '土'];
 const MIN_PASSWORD_LEN = 6; // Firebase Authenticationの既定要件(6文字以上)に合わせる
-const AUTH_EMAIL_DOMAIN = 'clubroom.invalid'; // バンド用の内部識別子として使う架空のメールドメイン
+const AUTH_EMAIL_DOMAIN = 'clubroom.invalid'; // バンド/個人用の内部識別子として使う架空のメールドメイン
+
+const NOTICE_SECTIONS = [
+  { key: 'caution', label: '注意事項' },
+  { key: 'whiteboard_priority', label: 'ホワイトボード優先順位' },
+  { key: 'meeting_schedule', label: '部会日程' },
+  { key: 'no_activity_days', label: '活動禁止日' },
+  { key: 'other_bands', label: 'その他バンド一覧' },
+];
 
 /* ============================================================
    状態
    ============================================================ */
 let bands = [];
 let reservations = [];
+let notices = {};      // { [key]: { text, updatedAt } }
+let liveEvents = [];
+let equipmentLogs = [];
+let links = [];
 
 let view = 'register';
 let selectedDate = null;
@@ -205,6 +217,7 @@ let authBandSelectId = '';
 let authPasswordDraft = '';
 let authError = '';
 
+let regTypeDraft = 'band'; // 'band' | 'individual'
 let regNameDraft = '';
 let regPasswordDraft = '';
 let regPasswordConfirmDraft = '';
@@ -214,6 +227,24 @@ let deletingBandId = null;
 let deletePasswordDraft = '';
 let deleteError = '';
 
+let noticeTab = NOTICE_SECTIONS[0].key; // '連絡事項'内のどのサブタブを見ているか('liveEvents'も入る)
+let noticeDraftText = '';
+let noticeDraftLoadedKey = null; // どのnoticeの下書きを今テキストエリアに表示しているか
+
+let liveEventNameDraft = '';
+let liveEventDateDraft = '';
+let liveEventTimeNoteDraft = '';
+let liveEventVenueDraft = '';
+
+let equipItemDraft = '';
+let equipBorrowerDraft = '';
+let equipCheckoutDateDraft = '';
+let equipReturnDateDraft = '';
+let equipNoteDraft = '';
+
+let linkLabelDraft = '';
+let linkUrlDraft = '';
+
 let toast = null;
 let connected = false;
 
@@ -221,6 +252,10 @@ function randomLocalPart(){
   const arr = new Uint8Array(12);
   crypto.getRandomValues(arr);
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function todayIsoDate(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 /* ============================================================
@@ -248,6 +283,38 @@ function subscribeToData(){
     console.error('reservations onSnapshot error', err);
     render();
   });
+
+  const noticesCol = fbSdk.collection(fbSdk.db, 'notices');
+  fbSdk.onSnapshot(noticesCol, function(snap){
+    const next = {};
+    snap.docs.forEach(d => { next[d.id] = d.data(); });
+    notices = next;
+    // 自分がまさに編集中のテキストエリアは、他人の更新で上書きしない
+    if (noticeDraftLoadedKey && notices[noticeDraftLoadedKey]){
+      // 何もしない(次にタブを開き直した時に反映される)
+    }
+    render();
+  }, function(err){ console.error('notices onSnapshot error', err); });
+
+  const liveEventsCol = fbSdk.collection(fbSdk.db, 'liveEvents');
+  fbSdk.onSnapshot(liveEventsCol, function(snap){
+    liveEvents = snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    render();
+  }, function(err){ console.error('liveEvents onSnapshot error', err); });
+
+  const equipmentCol = fbSdk.collection(fbSdk.db, 'equipment');
+  fbSdk.onSnapshot(equipmentCol, function(snap){
+    equipmentLogs = snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
+      .sort((a, b) => (b.checkoutDate || '').localeCompare(a.checkoutDate || ''));
+    render();
+  }, function(err){ console.error('equipment onSnapshot error', err); });
+
+  const linksCol = fbSdk.collection(fbSdk.db, 'links');
+  fbSdk.onSnapshot(linksCol, function(snap){
+    links = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    render();
+  }, function(err){ console.error('links onSnapshot error', err); });
 }
 
 function showToast(text, isError){
@@ -310,11 +377,18 @@ function render(){
       '</div>';
     return;
   }
+  const screens = {
+    register: renderRegisterScreen,
+    book: renderBookScreen,
+    notices: renderNoticesScreen,
+    equipment: renderEquipmentScreen,
+    links: renderLinksScreen,
+  };
   rootEl.innerHTML =
     renderHeader() +
     renderTopNav() +
     '<div class="content">' +
-      (view === 'register' ? renderRegisterScreen() : renderBookScreen()) +
+      (screens[view] || renderRegisterScreen)() +
     '</div>' +
     renderFooterNote() +
     renderToast();
@@ -325,8 +399,8 @@ function renderHeader(){
   return (
     '<div class="app-header"><div class="app-header-inner">' +
       '<div>' +
-        '<h1 class="app-title">FOLK部室予約</h1>' +
-        '<p class="app-sub">軽音FOLK 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
+        '<h1 class="app-title">部室予約システム</h1>' +
+        '<p class="app-sub">軽音楽部 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
       '</div>' +
       '<div class="conn-status"><span class="conn-dot' + (connected ? '' : ' offline') + '"></span>' +
         (connected ? 'リアルタイム同期中' : '接続中...') +
@@ -336,35 +410,52 @@ function renderHeader(){
 }
 
 function renderTopNav(){
+  const tabs = [
+    ['register', '登録(バンド・個人)'],
+    ['book', '予約する'],
+    ['notices', '連絡事項'],
+    ['equipment', '備品持ち出し記録'],
+    ['links', '各種リンク'],
+  ];
   return (
     '<div class="topnav">' +
-      '<button class="tab' + (view === 'register' ? ' active' : '') + '" data-action="nav" data-view="register" type="button">バンド登録</button>' +
-      '<button class="tab' + (view === 'book' ? ' active' : '') + '" data-action="nav" data-view="book" type="button">予約する</button>' +
+      tabs.map(([key, label]) =>
+        '<button class="tab' + (view === key ? ' active' : '') + '" data-action="nav" data-view="' + key + '" type="button">' + label + '</button>'
+      ).join('') +
     '</div>'
   );
 }
 
-/* ---------- 登録画面 ---------- */
+/* ---------- 登録画面(バンド・個人共通) ---------- */
 function renderRegisterScreen(){
   const rows = bands.length
     ? bands.map(b => renderBandRow(b)).join('')
-    : '<p class="empty-note">まだバンドが登録されていません。右のフォームから登録してください。</p>';
+    : '<p class="empty-note">まだ何も登録されていません。右のフォームから登録してください。</p>';
+
+  const isIndividual = regTypeDraft === 'individual';
+  const nameLabel = isIndividual ? 'お名前' : 'バンド名';
+  const namePlaceholder = isIndividual ? '例: 山田太郎' : '例: モスバーガーズ';
 
   return (
     '<div class="grid-2col">' +
-      '<div class="panel"><h2>登録済みバンド</h2>' + rows + '</div>' +
+      '<div class="panel"><h2>登録済み一覧(バンド・個人)</h2>' + rows + '</div>' +
       '<div class="panel">' +
-        '<h2>新しくバンドを登録</h2>' +
-        '<label for="reg-name">バンド名</label>' +
-        '<input id="reg-name" type="text" maxlength="30" value="' + escapeHtml(regNameDraft) + '">' +
+        '<h2>新しく登録する</h2>' +
+        '<label>登録の種類</label>' +
+        '<div class="seg-control">' +
+          '<button type="button" class="seg-btn' + (!isIndividual ? ' active' : '') + '" data-action="set-reg-type" data-type="band">バンド</button>' +
+          '<button type="button" class="seg-btn' + (isIndividual ? ' active' : '') + '" data-action="set-reg-type" data-type="individual">個人練習</button>' +
+        '</div>' +
+        '<label for="reg-name">' + nameLabel + '</label>' +
+        '<input id="reg-name" type="text" maxlength="30" placeholder="' + namePlaceholder + '" value="' + escapeHtml(regNameDraft) + '">' +
         '<label for="reg-password">パスワード(' + MIN_PASSWORD_LEN + '文字以上)</label>' +
         '<input id="reg-password" type="password" maxlength="40" value="' + escapeHtml(regPasswordDraft) + '">' +
         '<label for="reg-password-confirm">パスワード(確認)</label>' +
         '<input id="reg-password-confirm" type="password" maxlength="40" value="' + escapeHtml(regPasswordConfirmDraft) + '">' +
-        '<label for="reg-note">メンバー・メモ(任意)</label>' +
-        '<input id="reg-note" type="text" maxlength="60" value="' + escapeHtml(regNoteDraft) + '">' +
+        '<label for="reg-note">' + (isIndividual ? '楽器・メモ(任意)' : 'メンバー・メモ(任意)') + '</label>' +
+        '<input id="reg-note" type="text" maxlength="60" placeholder="' + (isIndividual ? '例: Gt' : '例: Vo/Gt 山田, Ba 佐藤') + '" value="' + escapeHtml(regNoteDraft) + '">' +
         '<button class="btn block" type="button" data-action="register-band">登録する</button>' +
-        '<p class="hint">パスワードはFirebase Authenticationによって安全に管理され、他の人が読み取ることはできません。予約画面でバンドを選んで操作するときに必要です。</p>' +
+        '<p class="hint">パスワードはFirebase Authenticationによって安全に管理され、他の人が読み取ることはできません。予約画面で選んで操作するときに必要です。個人練習の予約も、バンドと同じ利用ルール(1日2時間まで・2週間で2件まで)が適用されます。</p>' +
       '</div>' +
     '</div>'
   );
@@ -373,6 +464,7 @@ function renderRegisterScreen(){
 function renderBandRow(b){
   const hasFuture = bandHasFutureReservations(b.id);
   const isDeleting = deletingBandId === b.id;
+  const typeTag = '<span class="type-tag' + (b.type === 'individual' ? ' individual' : '') + '">' + (b.type === 'individual' ? '個人' : 'バンド') + '</span>';
   let deleteControl;
   if (hasFuture){
     deleteControl = '<button class="link-btn" type="button" disabled title="今後の予約があるため削除できません">削除</button>';
@@ -389,7 +481,7 @@ function renderBandRow(b){
   }
   return (
     '<div class="band-row">' +
-      '<div><div class="name">' + escapeHtml(b.name) + '</div>' +
+      '<div><div class="name">' + typeTag + ' ' + escapeHtml(b.name) + '</div>' +
       (b.note ? '<div class="note">' + escapeHtml(b.note) + '</div>' : '') + '</div>' +
       '<div>' + (isDeleting ? '' : deleteControl) + '</div>' +
     '</div>' +
@@ -529,7 +621,7 @@ function renderAuthPanel(){
     const band = bands.find(b => b.id === unlockedBandId);
     return (
       '<div class="panel">' +
-        '<h2>' + icon('lock') + ' バンドを選んで予約</h2>' +
+        '<h2>' + icon('lock') + ' 予約する人を選んで認証</h2>' +
         '<div class="auth-status">認証中: <strong>' + escapeHtml(band ? band.name : '') + '</strong>' +
           '<button class="link-btn" type="button" data-action="logout">切り替える</button>' +
         '</div>' +
@@ -539,24 +631,26 @@ function renderAuthPanel(){
   }
 
   if (bands.length === 0){
-    return '<div class="panel"><h2>' + icon('lock') + ' バンドを選んで予約</h2><p class="empty-note">まだバンドが登録されていません。「バンド登録」タブから登録してください。</p></div>';
+    return '<div class="panel"><h2>' + icon('lock') + ' 予約する人を選んで認証</h2><p class="empty-note">まだ何も登録されていません。「登録(バンド・個人)」タブから登録してください。</p></div>';
   }
 
   if (!authBandSelectId || !bands.some(b => b.id === authBandSelectId)) authBandSelectId = bands[0].id;
   const options = bands.map(b =>
-    '<option value="' + b.id + '"' + (b.id === authBandSelectId ? ' selected' : '') + '>' + escapeHtml(b.name) + '</option>'
+    '<option value="' + b.id + '"' + (b.id === authBandSelectId ? ' selected' : '') + '>' +
+      escapeHtml(b.name) + (b.type === 'individual' ? '(個人)' : '(バンド)') +
+    '</option>'
   ).join('');
 
   return (
     '<div class="panel">' +
-      '<h2>' + icon('lock') + ' バンドを選んで予約</h2>' +
-      '<label for="auth-band-select">バンドを選択</label>' +
+      '<h2>' + icon('lock') + ' 予約する人を選んで認証</h2>' +
+      '<label for="auth-band-select">バンド・個人を選択</label>' +
       '<select id="auth-band-select">' + options + '</select>' +
       '<label for="auth-password-input">パスワード</label>' +
       '<input id="auth-password-input" type="password" value="' + escapeHtml(authPasswordDraft) + '">' +
       '<button class="btn block" type="button" data-action="unlock-band">認証する</button>' +
       (authError ? '<div class="msg warn">' + escapeHtml(authError) + '</div>' : '') +
-      '<p class="hint">予約カレンダーは誰でも見られますが、予約や取消にはバンドごとのパスワードが必要です。</p>' +
+      '<p class="hint">予約カレンダーは誰でも見られますが、予約や取消にはそれぞれのパスワードが必要です。</p>' +
     '</div>'
   );
 }
@@ -650,13 +744,143 @@ function renderBookingPanel(){
   );
 }
 
+/* ---------- 連絡事項画面 ---------- */
+function renderNoticesScreen(){
+  const tabs = NOTICE_SECTIONS.map(s => s.key).concat(['liveEvents']);
+  if (!tabs.includes(noticeTab)) noticeTab = NOTICE_SECTIONS[0].key;
+
+  const tabButtons =
+    NOTICE_SECTIONS.map(s =>
+      '<button type="button" class="subtab' + (noticeTab === s.key ? ' active' : '') + '" data-action="notice-tab" data-key="' + s.key + '">' + s.label + '</button>'
+    ).join('') +
+    '<button type="button" class="subtab' + (noticeTab === 'liveEvents' ? ' active' : '') + '" data-action="notice-tab" data-key="liveEvents">今後のライブ予定</button>';
+
+  const body = noticeTab === 'liveEvents' ? renderLiveEventsSection() : renderNoticeMemoSection(noticeTab);
+
+  return (
+    '<div class="panel">' +
+      '<h2>連絡事項</h2>' +
+      '<div class="subtabs">' + tabButtons + '</div>' +
+      body +
+      '<p class="hint">連絡事項の内容は部員なら誰でも編集できます(パスワード不要)。荒らされたくない情報は載せないでください。</p>' +
+    '</div>'
+  );
+}
+
+function renderNoticeMemoSection(key){
+  const section = NOTICE_SECTIONS.find(s => s.key === key);
+  const stored = notices[key];
+  if (noticeDraftLoadedKey !== key){
+    noticeDraftText = (stored && stored.text) || '';
+    noticeDraftLoadedKey = key;
+  }
+  return (
+    '<label for="notice-textarea">' + escapeHtml(section ? section.label : '') + '</label>' +
+    '<textarea id="notice-textarea" rows="10" placeholder="ここにメモを書けます" style="width:100%;">' + escapeHtml(noticeDraftText) + '</textarea>' +
+    '<button class="btn" type="button" data-action="save-notice" data-key="' + key + '">保存する</button>' +
+    (stored && stored.updatedAtLabel ? '<p class="hint">最終更新: ' + escapeHtml(stored.updatedAtLabel) + '</p>' : '')
+  );
+}
+
+function renderLiveEventsSection(){
+  const rows = liveEvents.length ? liveEvents.map(ev =>
+    '<div class="reso-item">' +
+      '<span><strong>' + escapeHtml(ev.eventName) + '</strong> ' +
+        '<span class="when">' + escapeHtml(ev.date || '') + (ev.timeNote ? ' ' + escapeHtml(ev.timeNote) : '') + '</span>' +
+        (ev.venue ? ' @ ' + escapeHtml(ev.venue) : '') +
+      '</span>' +
+      '<button class="link-btn" type="button" data-action="delete-live-event" data-id="' + ev.id + '">削除</button>' +
+    '</div>'
+  ).join('') : '<p class="empty-note">今後のライブ予定はまだありません。</p>';
+
+  return (
+    rows +
+    '<div class="form-card-inline">' +
+      '<label for="live-event-name">イベント名</label>' +
+      '<input id="live-event-name" type="text" maxlength="60" value="' + escapeHtml(liveEventNameDraft) + '">' +
+      '<div class="form-row">' +
+        '<div><label for="live-event-date">日付</label><input id="live-event-date" type="date" value="' + escapeHtml(liveEventDateDraft) + '"></div>' +
+        '<div><label for="live-event-time">時間・備考(任意)</label><input id="live-event-time" type="text" maxlength="40" placeholder="例: 18:30開演/前売2000円" value="' + escapeHtml(liveEventTimeNoteDraft) + '"></div>' +
+      '</div>' +
+      '<label for="live-event-venue">会場</label>' +
+      '<input id="live-event-venue" type="text" maxlength="60" value="' + escapeHtml(liveEventVenueDraft) + '">' +
+      '<button class="btn" type="button" data-action="add-live-event">追加する</button>' +
+    '</div>'
+  );
+}
+
+/* ---------- 備品持ち出し記録画面 ---------- */
+function renderEquipmentScreen(){
+  const rows = equipmentLogs.length ? equipmentLogs.map(eq =>
+    '<div class="reso-item">' +
+      '<span>' +
+        '<strong>' + escapeHtml(eq.itemName) + '</strong> — ' + escapeHtml(eq.borrower) + ' ' +
+        '<span class="when">' + escapeHtml(eq.checkoutDate || '') + (eq.returnDate ? ' 〜 ' + escapeHtml(eq.returnDate) : '') + '</span>' +
+        (eq.returned ? ' <span class="type-tag">返却済</span>' : ' <span class="type-tag individual">貸出中</span>') +
+        (eq.note ? '<div class="note">' + escapeHtml(eq.note) + '</div>' : '') +
+      '</span>' +
+      '<span>' +
+        (!eq.returned ? '<button class="link-btn" type="button" data-action="toggle-equipment-returned" data-id="' + eq.id + '">返却済にする</button>' : '') +
+        '<button class="link-btn" type="button" data-action="delete-equipment" data-id="' + eq.id + '">削除</button>' +
+      '</span>' +
+    '</div>'
+  ).join('') : '<p class="empty-note">持ち出し記録はまだありません。</p>';
+
+  return (
+    '<div class="panel">' +
+      '<h2>備品持ち出し記録</h2>' +
+      rows +
+      '<div class="form-card-inline">' +
+        '<label for="equip-item">備品名</label>' +
+        '<input id="equip-item" type="text" maxlength="40" placeholder="例: マイクスタンド" value="' + escapeHtml(equipItemDraft) + '">' +
+        '<label for="equip-borrower">持ち出した人・バンド</label>' +
+        '<input id="equip-borrower" type="text" maxlength="40" value="' + escapeHtml(equipBorrowerDraft) + '">' +
+        '<div class="form-row">' +
+          '<div><label for="equip-checkout-date">持ち出し日</label><input id="equip-checkout-date" type="date" value="' + escapeHtml(equipCheckoutDateDraft || todayIsoDate()) + '"></div>' +
+          '<div><label for="equip-return-date">返却予定日(任意)</label><input id="equip-return-date" type="date" value="' + escapeHtml(equipReturnDateDraft) + '"></div>' +
+        '</div>' +
+        '<label for="equip-note">備考(任意)</label>' +
+        '<input id="equip-note" type="text" maxlength="60" value="' + escapeHtml(equipNoteDraft) + '">' +
+        '<button class="btn" type="button" data-action="add-equipment">記録する</button>' +
+      '</div>' +
+      '<p class="hint">この記録は部員なら誰でも編集できます(パスワード不要)。</p>' +
+    '</div>'
+  );
+}
+
+/* ---------- 各種リンク画面 ---------- */
+function renderLinksScreen(){
+  const rows = links.length ? links.map(l =>
+    '<div class="reso-item">' +
+      '<a href="' + escapeHtml(l.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(l.label) + '</a>' +
+      '<button class="link-btn" type="button" data-action="delete-link" data-id="' + l.id + '">削除</button>' +
+    '</div>'
+  ).join('') : '<p class="empty-note">リンクはまだ登録されていません。</p>';
+
+  return (
+    '<div class="panel">' +
+      '<h2>各種リンク</h2>' +
+      rows +
+      '<div class="form-card-inline">' +
+        '<label for="link-label">表示名</label>' +
+        '<input id="link-label" type="text" maxlength="40" placeholder="例: 部内共有ドライブ" value="' + escapeHtml(linkLabelDraft) + '">' +
+        '<label for="link-url">URL</label>' +
+        '<input id="link-url" type="text" maxlength="300" placeholder="https://..." value="' + escapeHtml(linkUrlDraft) + '">' +
+        '<button class="btn" type="button" data-action="add-link">追加する</button>' +
+      '</div>' +
+      '<p class="hint">このリンク一覧は部員なら誰でも編集できます(パスワード不要)。</p>' +
+    '</div>'
+  );
+}
+
 function renderFooterNote(){
   return (
     '<div class="footer-note">' +
       '<strong>利用ルール:</strong> 平日・土曜は8:00-20:00、日曜・祝日は10:00-18:00に利用できます。' +
-      '予約は30分単位、1バンド1日最大2時間まで。予約可能な期間は当日から2週間先までで、毎日20:00に翌日分が新たに解放されます。' +
-      '各バンドはこの2週間の範囲内で最大2件まで予約できます。祝日は法律に基づく算出ロジックで自動判定しています(振替休日・国民の休日を含む)。' +
-      'パスワードはFirebase Authenticationで安全に管理されます。データはFirestoreのセキュリティルールにより、各バンドが自分自身の予約のみ作成・削除できるように保護されています。' +
+      '予約は30分単位、1バンド(・個人)1日最大2時間まで。予約可能な期間は当日から2週間先までで、毎日20:00に翌日分が新たに解放されます。' +
+      '各バンド・各個人はこの2週間の範囲内で最大2件まで予約できます。祝日は法律に基づく算出ロジックで自動判定しています(振替休日・国民の休日を含む)。' +
+      'パスワードはFirebase Authenticationで安全に管理されます。データはFirestoreのセキュリティルールにより、各バンド・各個人が自分自身の予約のみ作成・削除できるように保護されています。' +
+      '連絡事項・備品持ち出し記録・各種リンクはパスワード不要で誰でも編集できます。' +
       '複数人が同時に操作すると、ごく稀に表示のずれが生じる場合があります。おかしいと感じたら再読み込みしてください。' +
     '</div>'
   );
@@ -682,6 +906,18 @@ function attachFieldEvents(){
   bindInput('reg-note', v => { regNoteDraft = v; });
   bindInput('delete-password-input', v => { deletePasswordDraft = v; });
   bindInput('auth-password-input', v => { authPasswordDraft = v; });
+  bindInput('notice-textarea', v => { noticeDraftText = v; });
+  bindInput('live-event-name', v => { liveEventNameDraft = v; });
+  bindInput('live-event-date', v => { liveEventDateDraft = v; });
+  bindInput('live-event-time', v => { liveEventTimeNoteDraft = v; });
+  bindInput('live-event-venue', v => { liveEventVenueDraft = v; });
+  bindInput('equip-item', v => { equipItemDraft = v; });
+  bindInput('equip-borrower', v => { equipBorrowerDraft = v; });
+  bindInput('equip-checkout-date', v => { equipCheckoutDateDraft = v; });
+  bindInput('equip-return-date', v => { equipReturnDateDraft = v; });
+  bindInput('equip-note', v => { equipNoteDraft = v; });
+  bindInput('link-label', v => { linkLabelDraft = v; });
+  bindInput('link-url', v => { linkUrlDraft = v; });
 
   const authBandSelect = rootEl.querySelector('#auth-band-select');
   if (authBandSelect) authBandSelect.addEventListener('change', e => { authBandSelectId = e.target.value; });
@@ -722,6 +958,8 @@ function attachDelegatedClickOnce(){
       view = el.dataset.view;
       authError = ''; deleteError = ''; deletingBandId = null;
       render();
+    } else if (action === 'set-reg-type'){
+      regTypeDraft = el.dataset.type; render();
     } else if (action === 'register-band'){
       await handleRegisterBand();
     } else if (action === 'start-delete-band'){
@@ -755,6 +993,24 @@ function attachDelegatedClickOnce(){
     } else if (action === 'cancel-reservation'){
       selectedReservationId = null;
       await handleCancelReservation(el.dataset.resId);
+    } else if (action === 'notice-tab'){
+      noticeTab = el.dataset.key; render();
+    } else if (action === 'save-notice'){
+      await handleSaveNotice(el.dataset.key);
+    } else if (action === 'add-live-event'){
+      await handleAddLiveEvent();
+    } else if (action === 'delete-live-event'){
+      await handleDeleteLiveEvent(el.dataset.id);
+    } else if (action === 'add-equipment'){
+      await handleAddEquipment();
+    } else if (action === 'toggle-equipment-returned'){
+      await handleToggleEquipmentReturned(el.dataset.id);
+    } else if (action === 'delete-equipment'){
+      await handleDeleteEquipment(el.dataset.id);
+    } else if (action === 'add-link'){
+      await handleAddLink();
+    } else if (action === 'delete-link'){
+      await handleDeleteLink(el.dataset.id);
     }
   });
 }
@@ -781,6 +1037,7 @@ async function handleRegisterBand(){
     const uid = cred.user.uid;
     await fbSdk.setDoc(fbSdk.doc(fbSdk.db, 'bands', uid), {
       name: name, nameLower: name.toLowerCase(), note: regNoteDraft.trim(),
+      type: regTypeDraft === 'individual' ? 'individual' : 'band',
       authEmail: authEmail, createdAt: fbSdk.serverTimestamp(),
     });
     await fbSdk.signOut(fbSdk.auth); // 登録直後は自動ログインさせず、明示的な認証操作に統一する
@@ -907,6 +1164,123 @@ function describeAuthError(e){
   if (code.indexOf('weak-password') !== -1) return 'パスワードが短すぎます。';
   if (code.indexOf('email-already-in-use') !== -1) return '内部エラー(識別子の重複)。もう一度お試しください。';
   return (e && e.message) ? e.message : '不明なエラー';
+}
+
+/* ============================================================
+   ハンドラ(連絡事項・ライブ予定・備品持ち出し記録・各種リンク)
+   ------------------------------------------------------------
+   これらはパスワード認証を必要としない(部員内の信頼で運用する)機能。
+   ============================================================ */
+async function handleSaveNotice(key){
+  const text = noticeDraftText;
+  try {
+    await fbSdk.setDoc(fbSdk.doc(fbSdk.db, 'notices', key), {
+      text: text,
+      updatedAt: fbSdk.serverTimestamp(),
+      updatedAtLabel: new Date().toLocaleString('ja-JP'),
+    });
+    showToast('保存しました。');
+  } catch (e) {
+    showToast('保存に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleAddLiveEvent(){
+  const eventName = liveEventNameDraft.trim();
+  const date = liveEventDateDraft;
+  const venue = liveEventVenueDraft.trim();
+  if (!eventName){ showToast('イベント名を入力してください。', true); return; }
+  if (!date){ showToast('日付を入力してください。', true); return; }
+  if (!venue){ showToast('会場を入力してください。', true); return; }
+  try {
+    await fbSdk.addDoc(fbSdk.collection(fbSdk.db, 'liveEvents'), {
+      eventName: eventName, date: date, timeNote: liveEventTimeNoteDraft.trim(), venue: venue,
+      createdAt: fbSdk.serverTimestamp(),
+    });
+    liveEventNameDraft = ''; liveEventDateDraft = ''; liveEventTimeNoteDraft = ''; liveEventVenueDraft = '';
+    showToast('ライブ予定を追加しました。');
+  } catch (e) {
+    showToast('追加に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleDeleteLiveEvent(id){
+  try {
+    await fbSdk.deleteDoc(fbSdk.doc(fbSdk.db, 'liveEvents', id));
+    showToast('ライブ予定を削除しました。');
+  } catch (e) {
+    showToast('削除に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleAddEquipment(){
+  const itemName = equipItemDraft.trim();
+  const borrower = equipBorrowerDraft.trim();
+  if (!itemName){ showToast('備品名を入力してください。', true); return; }
+  if (!borrower){ showToast('持ち出した人・バンドを入力してください。', true); return; }
+  try {
+    await fbSdk.addDoc(fbSdk.collection(fbSdk.db, 'equipment'), {
+      itemName: itemName, borrower: borrower,
+      checkoutDate: equipCheckoutDateDraft || todayIsoDate(),
+      returnDate: equipReturnDateDraft || '',
+      note: equipNoteDraft.trim(),
+      returned: false,
+      createdAt: fbSdk.serverTimestamp(),
+    });
+    equipItemDraft = ''; equipBorrowerDraft = ''; equipCheckoutDateDraft = ''; equipReturnDateDraft = ''; equipNoteDraft = '';
+    showToast('持ち出し記録を追加しました。');
+  } catch (e) {
+    showToast('追加に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleToggleEquipmentReturned(id){
+  const eq = equipmentLogs.find(x => x.id === id);
+  if (!eq) return;
+  const data = Object.assign({}, eq);
+  delete data.id;
+  data.returned = true;
+  try {
+    await fbSdk.setDoc(fbSdk.doc(fbSdk.db, 'equipment', id), data);
+    showToast(eq.itemName + ' を返却済みにしました。');
+  } catch (e) {
+    showToast('更新に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleDeleteEquipment(id){
+  try {
+    await fbSdk.deleteDoc(fbSdk.doc(fbSdk.db, 'equipment', id));
+    showToast('記録を削除しました。');
+  } catch (e) {
+    showToast('削除に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleAddLink(){
+  const label = linkLabelDraft.trim();
+  let url = linkUrlDraft.trim();
+  if (!label){ showToast('表示名を入力してください。', true); return; }
+  if (!url){ showToast('URLを入力してください。', true); return; }
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  try {
+    await fbSdk.addDoc(fbSdk.collection(fbSdk.db, 'links'), {
+      label: label, url: url, createdAt: fbSdk.serverTimestamp(),
+    });
+    linkLabelDraft = ''; linkUrlDraft = '';
+    showToast('リンクを追加しました。');
+  } catch (e) {
+    showToast('追加に失敗しました: ' + e.message, true);
+  }
+}
+
+async function handleDeleteLink(id){
+  try {
+    await fbSdk.deleteDoc(fbSdk.doc(fbSdk.db, 'links', id));
+    showToast('リンクを削除しました。');
+  } catch (e) {
+    showToast('削除に失敗しました: ' + e.message, true);
+  }
 }
 
 /* ============================================================
