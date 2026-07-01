@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>部室予約システム</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F1F3F4;
+    --surface:#FFFFFF;
+    --surface-2:#F8F9FA;
+    --line:#DADCE0;
+    --line-strong:#BDC1C6;
+    --ink:#202124;
+    --ink-dim:#5F6368;
+    --accent:#1A73E8;
+    --accent-hover:#1765CC;
+    --accent-soft:#E8F0FE;
+    --accent-soft-strong:#D2E3FC;
+    --block:#3C4043;
+    --block-text:#9AA0A6;
+    --reserved-bg:#E8F0FE;
+    --reserved-border:#1A73E8;
+    --past-bg:#F1F3F4;
+    --danger:#D93025;
+    --danger-soft:#FCE8E6;
+    --radius:8px;
+    --shadow:0 1px 2px 0 rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+    --font-display:'Roboto', Arial, sans-serif;
+    --font-body:'Roboto', Arial, sans-serif;
+    --font-mono:'Roboto Mono', monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  button, select, input{ font-family:inherit; }
+  .sr-only{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
+
+  .app-header{ background:var(--surface); border-bottom:1px solid var(--line); padding:16px 24px; }
+  .app-header-inner{ max-width:1180px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+  .app-title{ font-family:var(--font-display); font-weight:700; font-size:22px; margin:0; letter-spacing:0; color:var(--ink); }
+  .app-sub{ font-size:12.5px; color:var(--ink-dim); margin:2px 0 0; }
+  .conn-status{ font-size:12px; display:flex; align-items:center; gap:6px; color:var(--ink-dim); }
+  .conn-dot{ width:8px; height:8px; border-radius:50%; background:#34A853; }
+  .conn-dot.offline{ background:var(--danger); }
+
+  .topnav{ max-width:1180px; margin:0 auto; padding:0 24px; display:flex; gap:8px; border-bottom:1px solid var(--line); background:var(--surface); }
+  .tab{
+    background:none; border:none; padding:14px 8px; margin-right:24px; font-size:14px; color:var(--ink-dim);
+    cursor:pointer; border-bottom:3px solid transparent; font-weight:500; letter-spacing:0.1px;
+  }
+  .tab.active{ color:var(--accent); border-bottom-color:var(--accent); }
+  .tab:hover:not(.active){ color:var(--ink); }
+
+  .content{ max-width:1180px; margin:0 auto; padding:24px 24px 40px; display:flex; flex-direction:column; gap:20px; }
+  .grid-2col{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:820px){ .grid-2col{ grid-template-columns:1fr; } }
+
+  .panel{ background:var(--surface); border:none; box-shadow:var(--shadow); border-radius:12px; padding:20px 22px; }
+  .panel h2{ font-family:var(--font-display); font-weight:500; font-size:16px; margin:0 0 14px; letter-spacing:0; color:var(--ink); display:flex; align-items:center; gap:8px; }
+  .panel p.hint{ font-size:12px; color:var(--ink-dim); margin:8px 0 0; line-height:1.7; }
+
+  label{ display:block; font-size:12px; color:var(--ink-dim); margin:14px 0 6px; font-weight:500; }
+  input[type=text], input[type=password], select{
+    width:100%; background:var(--surface); border:1px solid var(--line-strong); color:var(--ink);
+    padding:10px 12px; border-radius:8px; font-size:14px;
+  }
+  input:focus, select:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+
+  .btn{
+    font-family:var(--font-body); font-weight:500; font-size:14px; letter-spacing:0.2px;
+    background:var(--accent); color:#fff; border:none; padding:10px 24px; border-radius:20px;
+    cursor:pointer; margin-top:16px; box-shadow:0 1px 2px 0 rgba(60,64,67,.3);
+  }
+  .btn:hover:not(:disabled){ background:var(--accent-hover); box-shadow:0 1px 3px 0 rgba(60,64,67,.4);}
+  .btn:disabled{ background:var(--line); color:var(--ink-dim); cursor:not-allowed; box-shadow:none; }
+  .btn.block{ width:100%; }
+  .btn.secondary{ background:transparent; border:1px solid var(--line-strong); color:var(--accent); box-shadow:none; }
+  .btn.secondary:hover:not(:disabled){ background:var(--accent-soft); border-color:var(--accent-soft-strong); }
+  .btn.danger{ background:var(--danger); }
+  .btn.danger:hover:not(:disabled){ background:#B0271E; }
+  .btn.small{ padding:6px 14px; font-size:12px; margin-top:0; }
+
+  .band-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .band-row:last-child{ border-bottom:none; }
+  .band-row .name{ font-weight:500; font-size:14px; }
+  .band-row .note{ font-size:12px; color:var(--ink-dim); margin-top:1px; }
+  .link-btn{ background:none; border:none; color:var(--accent); font-size:13px; cursor:pointer; padding:4px 8px; border-radius:14px; font-weight:500; }
+  .link-btn:hover{ background:var(--accent-soft); }
+  .link-btn:disabled{ color:var(--line-strong); cursor:not-allowed; background:none; }
+  .inline-delete{ display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .inline-delete input{ width:140px; }
+  .empty-note{ font-size:13px; color:var(--ink-dim); }
+
+  .msg{ font-size:12.5px; padding:10px 12px; border-radius:8px; margin-top:12px; }
+  .msg.warn{ background:var(--danger-soft); color:#B0271E; }
+  .msg.info{ background:var(--accent-soft); color:var(--accent-hover); }
+
+  .auth-status{ display:flex; align-items:center; justify-content:space-between; background:var(--accent-soft); border-radius:8px; padding:10px 14px; font-size:13px; margin-top:12px; }
+  .auth-status strong{ color:var(--accent-hover); }
+
+  .grid-wrap{ margin-top:4px; }
+  .grid-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+  .cal-grid{ display:grid; min-width:900px; font-size:11px; }
+  .cal-grid > div{ border-right:1px solid var(--line); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:center; min-height:26px; }
+  .grid-label{
+    position:sticky; left:0; background:var(--surface); z-index:2; flex-direction:column; align-items:flex-start;
+    padding:3px 8px; gap:0; font-family:var(--font-mono); border-right:1px solid var(--line-strong);
+  }
+  .grid-label .gl-date{ font-size:12px; font-weight:500; }
+  .grid-label .gl-dow{ font-size:10px; color:var(--ink-dim); }
+  .grid-label .gl-holiday{ font-size:9px; background:var(--danger-soft); color:#B0271E; padding:0 4px; border-radius:3px; margin-top:1px; }
+  .grid-label.today-row{ background:var(--accent-soft); }
+  .grid-hour-label{ font-family:var(--font-mono); color:var(--ink-dim); background:var(--surface-2); font-size:10px; }
+  .cell-blocked{ background:var(--block); }
+  .cell-past{ background:var(--past-bg); }
+  .cell-free{ background:#fff; cursor:pointer; }
+  .cell-free:hover{ background:var(--accent-soft); }
+  .cell-free.today-row{ background:#F8FAFF; }
+  .cell-reserved{
+    background:var(--reserved-bg); border-left:3px solid var(--reserved-border); color:#174EA6;
+    font-size:11px; font-weight:500; padding:2px 6px 2px 5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+    cursor:pointer; justify-content:flex-start !important;
+  }
+  .cell-reserved:hover{ background:var(--accent-soft-strong); }
+  .cell-past.today-row{ background:#E8EAED; }
+
+  .legend{ display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; font-size:11.5px; color:var(--ink-dim); }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .legend .swatch{ width:11px; height:11px; border-radius:2px; display:inline-block; }
+
+  .reso-detail{
+    display:none; align-items:flex-start; justify-content:space-between; gap:14px;
+    background:var(--accent-soft); border-radius:8px; padding:14px 16px; margin-bottom:14px;
+  }
+  .reso-detail.show{ display:flex; }
+  .reso-detail .rd-band{ font-size:15px; font-weight:500; color:var(--ink); display:flex; align-items:center; gap:8px; }
+  .reso-detail .rd-dot{ width:10px; height:10px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+  .reso-detail .rd-when{ font-family:var(--font-mono); font-size:13px; color:var(--ink-dim); margin-top:4px; }
+  .reso-detail .rd-actions{ display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+
+  .form-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:480px){ .form-row{ grid-template-columns:1fr; } }
+
+  .reso-item{ display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .reso-item:last-child{ border-bottom:none; }
+  .reso-item .when{ font-family:var(--font-mono); font-size:12px; color:var(--ink-dim); }
+
+  .toast{
+    position:fixed; bottom:20px; right:20px; left:20px; max-width:340px; margin:0 0 0 auto;
+    background:var(--ink); color:#fff; padding:11px 15px; border-radius:8px; font-size:13px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.2); z-index:50;
+  }
+  .toast.error{ background:var(--danger); }
+
+  .footer-note{ max-width:1180px; margin:0 auto; padding:0 24px 32px; font-size:11px; color:var(--ink-dim); line-height:1.8; }
+  .footer-note strong{ color:var(--ink); }
+
+  .icon{ width:14px; height:14px; vertical-align:-2px; }
+
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+  import { createFirebaseAdapter, FIREBASE_CONFIG_IS_SET } from './firebase-adapter.js';
+  import { startApp } from './app.js';
+
+  createFirebaseAdapter().then(function(fbSdk){
+    startApp(fbSdk, FIREBASE_CONFIG_IS_SET, document.getElementById('app'));
+  }).catch(function(e){
+    console.error(e);
+    document.getElementById('app').innerHTML =
+      '<div style="max-width:640px;margin:60px auto;padding:24px;font-family:sans-serif;">' +
+      '<h1 style="font-size:18px;">エラー</h1><p>Firebaseへの接続に失敗しました。firebase-config.js の値を確認してください。</p>' +
+      '<p style="color:#888;font-size:13px;">' + (e && e.message ? e.message : e) + '</p></div>';
+  });
+</script>
+</body>
+</html>
