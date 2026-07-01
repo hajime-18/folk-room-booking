@@ -425,7 +425,7 @@ function emailMatchesDomain(email){
 function renderSignInScreen(){
   return (
     '<div style="max-width:420px;margin:80px auto;padding:32px;text-align:center;font-family:inherit;">' +
-      '<h1 style="font-size:20px;margin:0 0 8px;">部室予約システム</h1>' +
+      '<h1 style="font-size:20px;margin:0 0 8px;">軽音FOLK部室予約システム</h1>' +
       '<p style="color:#5F6368;font-size:13px;margin:0 0 24px;">利用にはGoogleアカウントでのログインが必要です。</p>' +
       '<button class="btn" type="button" data-action="google-sign-in" style="width:100%;">Googleでログイン</button>' +
     '</div>'
@@ -447,8 +447,8 @@ function renderHeader(){
   return (
     '<div class="app-header"><div class="app-header-inner">' +
       '<div>' +
-        '<h1 class="app-title">部室予約システム</h1>' +
-        '<p class="app-sub">軽音楽部 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
+        '<h1 class="app-title">軽音FOLK部室予約システム</h1>' +
+        '<p class="app-sub">部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:14px;">' +
         '<div class="conn-status"><span class="conn-dot' + (connected ? '' : ' offline') + '"></span>' +
@@ -492,7 +492,7 @@ function renderRegisterScreen(){
     : '<p class="empty-note">まだ登録されていません。</p>';
 
   const isIndividual = regTypeDraft === 'individual';
-  const nameLabel = isIndividual ? 'お名前' : 'バンド名';
+  const nameLabel = isIndividual ? '名前' : 'バンド名';
 
   return (
     '<div class="grid-2col">' +
@@ -816,7 +816,7 @@ function renderLiveEventsSection(){
       '<input id="live-event-name" type="text" maxlength="60" value="' + escapeHtml(liveEventNameDraft) + '">' +
       '<div class="form-row">' +
         '<div><label for="live-event-date">日付</label><input id="live-event-date" type="date" value="' + escapeHtml(liveEventDateDraft) + '"></div>' +
-        '<div><label for="live-event-time">時間・備考(任意)</label><input id="live-event-time" type="text" maxlength="40" placeholder="例: 18:30開演/前売2000円" value="' + escapeHtml(liveEventTimeNoteDraft) + '"></div>' +
+        '<div><label for="live-event-time">時間・備考(任意)</label><input id="live-event-time" type="text" maxlength="40" value="' + escapeHtml(liveEventTimeNoteDraft) + '"></div>' +
       '</div>' +
       '<label for="live-event-venue">会場</label>' +
       '<input id="live-event-venue" type="text" maxlength="60" value="' + escapeHtml(liveEventVenueDraft) + '">' +
