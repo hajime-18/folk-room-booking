@@ -24,8 +24,7 @@ service cloud.firestore {
     function isMember() {
       return request.auth != null
         && request.auth.token.email != null
-        //&& request.auth.token.email.lower().matches('.*@okayama-u.ac.jp$');
-        && request.auth.token.email.lower().matches('.*@(.*\\.)?okayama-u.ac.jp$');
+        && request.auth.token.email.lower().matches('.*@YOUR_SCHOOL_DOMAIN$');
     }
 
     match /bands/{bandId} {

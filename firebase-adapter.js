@@ -48,5 +48,7 @@ export async function createFirebaseAdapter(){
     deleteDoc: storeMod.deleteDoc,
     onSnapshot: storeMod.onSnapshot,
     serverTimestamp: storeMod.serverTimestamp,
+    query: storeMod.query,
+    orderBy: storeMod.orderBy,
   };
 }

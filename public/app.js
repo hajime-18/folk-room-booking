@@ -250,10 +250,28 @@ function todayIsoDate(){
 /* ============================================================
    Firestore連携(リアルタイム同期)
    ============================================================ */
+function timestampMillis(ts){
+  if (!ts) return null;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  return null;
+}
+
 function subscribeToData(){
   const bandsCol = fbSdk.collection(fbSdk.db, 'bands');
   fbSdk.onSnapshot(bandsCol, function(snap){
-    bands = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    const list = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    // 新しく登録したものを上に表示する。保存直後でサーバー時刻がまだ確定していない
+    // 項目(ミリ秒が取れないもの)は「今まさに追加された」とみなして先頭に置く。
+    list.sort((a, b) => {
+      const ma = timestampMillis(a.createdAt);
+      const mb = timestampMillis(b.createdAt);
+      if (ma == null && mb == null) return 0;
+      if (ma == null) return -1;
+      if (mb == null) return 1;
+      return mb - ma;
+    });
+    bands = list;
     connected = true;
     render();
   }, function(err){
@@ -463,17 +481,25 @@ function renderTopNav(){
 
 /* ---------- 登録画面(バンド・個人共通) ---------- */
 function renderRegisterScreen(){
-  const rows = bands.length
-    ? bands.map(b => renderBandRow(b)).join('')
-    : '<p class="empty-note">まだ何も登録されていません。右のフォームから登録してください。</p>';
+  const bandList = bands.filter(b => b.type !== 'individual');
+  const individualList = bands.filter(b => b.type === 'individual');
+
+  const bandRows = bandList.length
+    ? bandList.map(b => renderBandRow(b)).join('')
+    : '<p class="empty-note">まだ登録されていません。</p>';
+  const individualRows = individualList.length
+    ? individualList.map(b => renderBandRow(b)).join('')
+    : '<p class="empty-note">まだ登録されていません。</p>';
 
   const isIndividual = regTypeDraft === 'individual';
   const nameLabel = isIndividual ? 'お名前' : 'バンド名';
-  const namePlaceholder = isIndividual ? '例: 山田太郎' : '例: モスバーガーズ';
 
   return (
     '<div class="grid-2col">' +
-      '<div class="panel"><h2>登録済み一覧(バンド・個人)</h2>' + rows + '</div>' +
+      '<div class="panel">' +
+        '<h2>登録済みバンド</h2>' + bandRows +
+        '<h2 style="margin-top:20px;">登録済み個人練習</h2>' + individualRows +
+      '</div>' +
       '<div class="panel">' +
         '<h2>新しく登録する</h2>' +
         '<label>登録の種類</label>' +
@@ -482,9 +508,9 @@ function renderRegisterScreen(){
           '<button type="button" class="seg-btn' + (isIndividual ? ' active' : '') + '" data-action="set-reg-type" data-type="individual">個人練習</button>' +
         '</div>' +
         '<label for="reg-name">' + nameLabel + '</label>' +
-        '<input id="reg-name" type="text" maxlength="30" placeholder="' + namePlaceholder + '" value="' + escapeHtml(regNameDraft) + '">' +
+        '<input id="reg-name" type="text" maxlength="30" value="' + escapeHtml(regNameDraft) + '">' +
         '<label for="reg-note">' + (isIndividual ? '楽器・メモ(任意)' : 'メンバー・メモ(任意)') + '</label>' +
-        '<input id="reg-note" type="text" maxlength="60" placeholder="' + (isIndividual ? '例: Gt' : '例: Vo/Gt 山田, Ba 佐藤') + '" value="' + escapeHtml(regNoteDraft) + '">' +
+        '<input id="reg-note" type="text" maxlength="60" value="' + escapeHtml(regNoteDraft) + '">' +
         '<button class="btn block" type="button" data-action="register-band">登録する</button>' +
         '<p class="hint">認証は行いません。部員内の信頼にもとづいて運用してください。個人練習の予約も、バンドと同じ利用ルール(1日2時間まで・2週間で2件まで)が適用されます。</p>' +
       '</div>' +
