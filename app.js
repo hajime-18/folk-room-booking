@@ -325,8 +325,8 @@ function renderHeader(){
   return (
     '<div class="app-header"><div class="app-header-inner">' +
       '<div>' +
-        '<h1 class="app-title">部室予約システム</h1>' +
-        '<p class="app-sub">軽音楽部 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
+        '<h1 class="app-title">FOLK部室予約</h1>' +
+        '<p class="app-sub">軽音FOLK 部室予約 — 30分単位・当日から2週間先まで予約可</p>' +
       '</div>' +
       '<div class="conn-status"><span class="conn-dot' + (connected ? '' : ' offline') + '"></span>' +
         (connected ? 'リアルタイム同期中' : '接続中...') +
@@ -362,7 +362,7 @@ function renderRegisterScreen(){
         '<label for="reg-password-confirm">パスワード(確認)</label>' +
         '<input id="reg-password-confirm" type="password" maxlength="40" value="' + escapeHtml(regPasswordConfirmDraft) + '">' +
         '<label for="reg-note">メンバー・メモ(任意)</label>' +
-        '<input id="reg-note" type="text" maxlength="60" placeholder="例: Vo/Gt 山田, Ba 佐藤" value="' + escapeHtml(regNoteDraft) + '">' +
+        '<input id="reg-note" type="text" maxlength="60" value="' + escapeHtml(regNoteDraft) + '">' +
         '<button class="btn block" type="button" data-action="register-band">登録する</button>' +
         '<p class="hint">パスワードはFirebase Authenticationによって安全に管理され、他の人が読み取ることはできません。予約画面でバンドを選んで操作するときに必要です。</p>' +
       '</div>' +
