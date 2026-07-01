@@ -356,7 +356,7 @@ function renderRegisterScreen(){
       '<div class="panel">' +
         '<h2>新しくバンドを登録</h2>' +
         '<label for="reg-name">バンド名</label>' +
-        '<input id="reg-name" type="text" maxlength="30" placeholder="例: モスバーガーズ" value="' + escapeHtml(regNameDraft) + '">' +
+        '<input id="reg-name" type="text" maxlength="30" value="' + escapeHtml(regNameDraft) + '">' +
         '<label for="reg-password">パスワード(' + MIN_PASSWORD_LEN + '文字以上)</label>' +
         '<input id="reg-password" type="password" maxlength="40" value="' + escapeHtml(regPasswordDraft) + '">' +
         '<label for="reg-password-confirm">パスワード(確認)</label>' +
